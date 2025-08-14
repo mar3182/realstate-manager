@@ -12,6 +12,9 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      DATABASE_URL: sqlite:///./ci.db
+      PYTHONUNBUFFERED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,6 +39,18 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Show environment info
+        run: |
+          . .venv/bin/activate
+          python -V
+          pip list
+          python -c "import os, pathlib; print('CWD', os.getcwd()); print('DB URL', os.getenv('DATABASE_URL')); print('Alembic versions', [p.name for p in pathlib.Path('alembic/versions').glob('*.py')])"
+
+      - name: Run Alembic upgrade (pre-test)
+        run: |
+          . .venv/bin/activate
+          alembic upgrade head
+
       - name: Lint
         run: |
           . .venv/bin/activate
@@ -46,4 +61,13 @@ jobs:
           ENV: test
         run: |
           . .venv/bin/activate
-          pytest -q
+          pytest -q --junitxml=test-results.xml || EXIT_CODE=$?
+          echo "Pytest exit code: ${EXIT_CODE:-0}"
+          exit ${EXIT_CODE:-0}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: backend/test-results.xml
