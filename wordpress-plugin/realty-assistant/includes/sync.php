@@ -32,23 +32,45 @@ function rai_sync_properties() {
     }
     $count = 0;
     foreach ( $data as $prop ) {
+        if ( empty( $prop['id'] ) ) { continue; }
+        $backend_id = intval( $prop['id'] );
         $title = isset( $prop['title'] ) ? sanitize_text_field( $prop['title'] ) : 'Untitled Property';
-        $existing = get_page_by_title( $title, OBJECT, 'rai_property' );
-        if ( $existing ) {
-            // Update content
-            wp_update_post( [
-                'ID' => $existing->ID,
-                'post_content' => isset( $prop['description'] ) ? wp_kses_post( $prop['description'] ) : '',
-            ] );
+
+        // Query by meta to find existing mapping
+        $existing_query = new WP_Query([
+            'post_type' => 'rai_property',
+            'meta_key' => RAI_META_BACKEND_ID,
+            'meta_value' => $backend_id,
+            'post_status' => 'any',
+            'fields' => 'ids',
+            'posts_per_page' => 1,
+            'no_found_rows' => true,
+        ]);
+        $existing_id = $existing_query->have_posts() ? $existing_query->posts[0] : 0;
+        $post_data = [
+            'post_type' => 'rai_property',
+            'post_title' => $title,
+            'post_status' => 'publish',
+            'post_content' => isset( $prop['description'] ) ? wp_kses_post( $prop['description'] ) : '',
+        ];
+        if ( $existing_id ) {
+            $post_data['ID'] = $existing_id;
+            wp_update_post( $post_data );
         } else {
-            wp_insert_post( [
-                'post_type' => 'rai_property',
-                'post_title' => $title,
-                'post_status' => 'publish',
-                'post_content' => isset( $prop['description'] ) ? wp_kses_post( $prop['description'] ) : '',
-            ] );
+            $existing_id = wp_insert_post( $post_data );
+            if ( $existing_id && ! is_wp_error( $existing_id ) ) {
+                update_post_meta( $existing_id, RAI_META_BACKEND_ID, $backend_id );
+            }
+        }
+        // Optional extra fields
+        if ( isset( $prop['price'] ) ) {
+            update_post_meta( $existing_id, '_rai_price', sanitize_text_field( $prop['price'] ) );
+        }
+        if ( isset( $prop['address'] ) ) {
+            update_post_meta( $existing_id, '_rai_address', sanitize_text_field( $prop['address'] ) );
         }
         $count++;
+        wp_reset_postdata();
     }
     return [ 'count' => $count ];
 }

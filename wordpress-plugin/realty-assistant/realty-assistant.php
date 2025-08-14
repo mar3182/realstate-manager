@@ -14,6 +14,7 @@ define( 'RAI_VERSION', '0.1.0' );
 define( 'RAI_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
 define( 'RAI_OPTION_KEY', 'rai_settings' );
+define( 'RAI_META_BACKEND_ID', '_rai_backend_id' );
 
 require_once RAI_PLUGIN_DIR . 'includes/settings.php';
 require_once RAI_PLUGIN_DIR . 'includes/cpt-property.php';
