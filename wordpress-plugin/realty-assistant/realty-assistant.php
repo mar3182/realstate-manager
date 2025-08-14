@@ -93,8 +93,9 @@ function rai_handle_row_ai_regen() {
             return add_query_arg( 'rai_ai_regen_success', 1, $location );
         } );
     } else {
-        add_filter( 'redirect_post_location', function( $location ) {
-            return add_query_arg( 'rai_ai_regen_error', 1, $location );
+        $err_param = $result['rate_limited'] ? 'rai_ai_regen_rl' : 'rai_ai_regen_error';
+        add_filter( 'redirect_post_location', function( $location ) use ( $err_param ) {
+            return add_query_arg( $err_param, 1, $location );
         } );
     }
     wp_safe_redirect( admin_url( 'edit.php?post_type=rai_property' ) );
@@ -107,6 +108,8 @@ function rai_admin_notices_ai_regen() {
         echo '<div class="notice notice-success is-dismissible"><p>AI description regenerated.</p></div>';
     } elseif ( isset( $_GET['rai_ai_regen_error'] ) ) {
         echo '<div class="notice notice-error is-dismissible"><p>AI regeneration failed.</p></div>';
+    } elseif ( isset( $_GET['rai_ai_regen_rl'] ) ) {
+        echo '<div class="notice notice-warning is-dismissible"><p>Rate limit: please wait before regenerating again.</p></div>';
     }
 }
 add_action( 'admin_notices', 'rai_admin_notices_ai_regen' );

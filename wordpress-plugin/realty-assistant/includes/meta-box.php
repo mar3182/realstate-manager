@@ -31,7 +31,12 @@ function rai_render_property_meta_box( $post ) {
         echo '<p style="color:#b32d2e"><strong>Last Error:</strong> ' . esc_html( $last_error ) . '</p>';
     }
     wp_nonce_field( 'rai_ai_regen', 'rai_ai_regen_nonce' );
+    $last_regen = intval( get_post_meta( $post->ID, '_rai_ai_last_regen', true ) );
+    if ( $last_regen ) {
+        echo '<p><strong>Last AI Regen:</strong> ' . esc_html( date_i18n( 'Y-m-d H:i', $last_regen ) ) . '</p>';
+    }
     echo '<p><button class="button" name="rai_ai_regen" value="1">Regenerate AI Description</button></p>';
+    echo '<p style="font-size:11px;opacity:.7">Limits: max 1 per property /5 min, 5 total per minute.</p>';
 }
 
 // Handle AI regenerate on save_post
