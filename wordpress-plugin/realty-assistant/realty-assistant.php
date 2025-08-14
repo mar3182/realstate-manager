@@ -60,6 +60,76 @@ function rai_property_column_content( $column, $post_id ) {
 }
 add_action( 'manage_rai_property_posts_custom_column', 'rai_property_column_content', 10, 2 );
 
+// Row action: Regenerate AI
+function rai_row_actions_ai_regen( $actions, $post ) {
+    if ( $post->post_type !== 'rai_property' ) {
+        return $actions;
+    }
+    $nonce = wp_create_nonce( 'rai_ai_row_regen_' . $post->ID );
+    $url = add_query_arg( [
+        'rai_ai_regen' => 1,
+        'post' => $post->ID,
+        '_rai_nonce' => $nonce,
+    ], admin_url( 'edit.php?post_type=rai_property' ) );
+    $actions['rai_ai_regen'] = '<a href="' . esc_url( $url ) . '" aria-label="Regenerate AI Description">Regenerate AI</a>';
+    return $actions;
+}
+add_filter( 'post_row_actions', 'rai_row_actions_ai_regen', 10, 2 );
+
+function rai_handle_row_ai_regen() {
+    if ( ! is_admin() ) return;
+    if ( empty( $_GET['rai_ai_regen'] ) || empty( $_GET['post'] ) ) return;
+    $post_id = intval( $_GET['post'] );
+    if ( ! current_user_can( 'edit_post', $post_id ) ) return;
+    if ( empty( $_GET['_rai_nonce'] ) || ! wp_verify_nonce( $_GET['_rai_nonce'], 'rai_ai_row_regen_' . $post_id ) ) return;
+
+    $post = get_post( $post_id );
+    if ( ! $post || $post->post_type !== 'rai_property' ) return;
+
+    // Build prompt
+    $base_text = get_post_meta( $post_id, '_rai_address', true );
+    if ( ! $base_text ) { $base_text = $post->post_title; }
+    $settings = rai_get_settings();
+    $endpoint = trailingslashit( $settings['api_base_url'] ) . 'ai/draft';
+    $args = [
+        'headers' => [ 'Accept' => 'application/json', 'Content-Type' => 'application/json' ],
+        'method' => 'POST',
+        'timeout' => 20,
+        'body' => wp_json_encode( [ 'raw_text' => $base_text ] ),
+    ];
+    if ( ! empty( $settings['auth_token'] ) ) {
+        $args['headers']['Authorization'] = 'Bearer ' . $settings['auth_token'];
+    } else {
+        $args['headers']['X-Tenant-ID'] = $settings['tenant_id'];
+    }
+    $response = wp_remote_post( $endpoint, $args );
+    if ( ! is_wp_error( $response ) && 200 === wp_remote_retrieve_response_code( $response ) ) {
+        $data = json_decode( wp_remote_retrieve_body( $response ), true );
+        if ( isset( $data['description'] ) ) {
+            wp_update_post( [ 'ID' => $post_id, 'post_content' => wp_kses_post( $data['description'] ) ] );
+            add_filter( 'redirect_post_location', function( $location ) use ( $post_id ) {
+                return add_query_arg( 'rai_ai_regen_success', 1, $location );
+            } );
+        }
+    } else {
+        add_filter( 'redirect_post_location', function( $location ) {
+            return add_query_arg( 'rai_ai_regen_error', 1, $location );
+        } );
+    }
+    wp_safe_redirect( admin_url( 'edit.php?post_type=rai_property' ) );
+    exit;
+}
+add_action( 'admin_init', 'rai_handle_row_ai_regen' );
+
+function rai_admin_notices_ai_regen() {
+    if ( isset( $_GET['rai_ai_regen_success'] ) ) {
+        echo '<div class="notice notice-success is-dismissible"><p>AI description regenerated.</p></div>';
+    } elseif ( isset( $_GET['rai_ai_regen_error'] ) ) {
+        echo '<div class="notice notice-error is-dismissible"><p>AI regeneration failed.</p></div>';
+    }
+}
+add_action( 'admin_notices', 'rai_admin_notices_ai_regen' );
+
 // Activation / Deactivation
 function rai_activate() {
     rai_register_property_cpt();
