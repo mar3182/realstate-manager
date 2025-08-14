@@ -20,6 +20,7 @@ require_once RAI_PLUGIN_DIR . 'includes/settings.php';
 require_once RAI_PLUGIN_DIR . 'includes/cpt-property.php';
 require_once RAI_PLUGIN_DIR . 'includes/sync.php';
 require_once RAI_PLUGIN_DIR . 'includes/meta-box.php';
+require_once RAI_PLUGIN_DIR . 'includes/ai.php';
 
 // Admin list columns: thumbnail + price + address
 function rai_property_columns( $columns ) {
@@ -86,31 +87,11 @@ function rai_handle_row_ai_regen() {
     $post = get_post( $post_id );
     if ( ! $post || $post->post_type !== 'rai_property' ) return;
 
-    // Build prompt
-    $base_text = get_post_meta( $post_id, '_rai_address', true );
-    if ( ! $base_text ) { $base_text = $post->post_title; }
-    $settings = rai_get_settings();
-    $endpoint = trailingslashit( $settings['api_base_url'] ) . 'ai/draft';
-    $args = [
-        'headers' => [ 'Accept' => 'application/json', 'Content-Type' => 'application/json' ],
-        'method' => 'POST',
-        'timeout' => 20,
-        'body' => wp_json_encode( [ 'raw_text' => $base_text ] ),
-    ];
-    if ( ! empty( $settings['auth_token'] ) ) {
-        $args['headers']['Authorization'] = 'Bearer ' . $settings['auth_token'];
-    } else {
-        $args['headers']['X-Tenant-ID'] = $settings['tenant_id'];
-    }
-    $response = wp_remote_post( $endpoint, $args );
-    if ( ! is_wp_error( $response ) && 200 === wp_remote_retrieve_response_code( $response ) ) {
-        $data = json_decode( wp_remote_retrieve_body( $response ), true );
-        if ( isset( $data['description'] ) ) {
-            wp_update_post( [ 'ID' => $post_id, 'post_content' => wp_kses_post( $data['description'] ) ] );
-            add_filter( 'redirect_post_location', function( $location ) use ( $post_id ) {
-                return add_query_arg( 'rai_ai_regen_success', 1, $location );
-            } );
-        }
+    $result = rai_regenerate_ai_description( $post_id );
+    if ( $result['success'] ) {
+        add_filter( 'redirect_post_location', function( $location ) use ( $post_id ) {
+            return add_query_arg( 'rai_ai_regen_success', 1, $location );
+        } );
     } else {
         add_filter( 'redirect_post_location', function( $location ) {
             return add_query_arg( 'rai_ai_regen_error', 1, $location );
@@ -129,6 +110,36 @@ function rai_admin_notices_ai_regen() {
     }
 }
 add_action( 'admin_notices', 'rai_admin_notices_ai_regen' );
+
+// Bulk action skeleton for future (will be completed in next step)
+add_filter( 'bulk_actions-edit-rai_property', function( $bulk_actions ) {
+    $bulk_actions['rai_bulk_ai_regen'] = 'Regenerate AI Descriptions';
+    return $bulk_actions;
+} );
+
+add_filter( 'handle_bulk_actions-edit-rai_property', function( $redirect, $doaction, $post_ids ) {
+    if ( $doaction === 'rai_bulk_ai_regen' ) {
+        $success = 0; $fail = 0;
+        foreach ( $post_ids as $pid ) {
+            $res = rai_regenerate_ai_description( $pid );
+            if ( $res['success'] ) { $success++; } else { $fail++; }
+        }
+        $redirect = add_query_arg( [
+            'rai_bulk_ai_done' => 1,
+            'rai_bulk_ai_success' => $success,
+            'rai_bulk_ai_fail' => $fail,
+        ], $redirect );
+    }
+    return $redirect;
+}, 10, 3 );
+
+add_action( 'admin_notices', function() {
+    if ( isset( $_GET['rai_bulk_ai_done'] ) ) {
+        $s = intval( $_GET['rai_bulk_ai_success'] ?? 0 );
+        $f = intval( $_GET['rai_bulk_ai_fail'] ?? 0 );
+        echo '<div class="notice notice-info is-dismissible"><p>AI regeneration complete: ' . esc_html( $s ) . ' success, ' . esc_html( $f ) . ' failed.</p></div>';
+    }
+} );
 
 // Activation / Deactivation
 function rai_activate() {

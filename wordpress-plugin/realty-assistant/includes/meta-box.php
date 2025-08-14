@@ -40,36 +40,10 @@ function rai_handle_ai_regen( $post_id, $post, $update ) {
     if ( empty( $_POST['rai_ai_regen'] ) ) return;
     if ( ! isset( $_POST['rai_ai_regen_nonce'] ) || ! wp_verify_nonce( $_POST['rai_ai_regen_nonce'], 'rai_ai_regen' ) ) return;
 
-    // Build prompt from meta / content
-    $base_text = get_post_meta( $post_id, '_rai_address', true );
-    if ( ! $base_text ) { $base_text = $post->post_title; }
-
-    $settings = rai_get_settings();
-    $endpoint = trailingslashit( $settings['api_base_url'] ) . 'ai/draft';
-    $args = [
-        'headers' => [ 'Accept' => 'application/json', 'Content-Type' => 'application/json' ],
-        'method' => 'POST',
-        'timeout' => 20,
-        'body' => wp_json_encode( [ 'raw_text' => $base_text ] ),
-    ];
-    if ( ! empty( $settings['auth_token'] ) ) {
-        $args['headers']['Authorization'] = 'Bearer ' . $settings['auth_token'];
-    } else {
-        $args['headers']['X-Tenant-ID'] = $settings['tenant_id'];
-    }
-    $response = wp_remote_post( $endpoint, $args );
-    if ( is_wp_error( $response ) ) {
-        return;
-    }
-    $code = wp_remote_retrieve_response_code( $response );
-    if ( $code !== 200 ) {
-        return;
-    }
-    $body = wp_remote_retrieve_body( $response );
-    $data = json_decode( $body, true );
-    if ( isset( $data['description'] ) ) {
+    $result = rai_regenerate_ai_description( $post_id );
+    if ( $result['success'] ) {
         remove_action( 'save_post', 'rai_handle_ai_regen', 20 );
-        wp_update_post( [ 'ID' => $post_id, 'post_content' => wp_kses_post( $data['description'] ) ] );
+        // Already updated content inside helper
         add_action( 'save_post', 'rai_handle_ai_regen', 20, 3 );
     }
 }
