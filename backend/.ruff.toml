@@ -1,0 +1,31 @@
+# Ruff configuration
+line-length = 120
+indent-width = 4
+target-version = "py311"
+
+[lint]
+select = ["E","F","I","B","UP"]
+# Temporarily ignore noisy or FastAPI idiomatic patterns; tighten later.
+ignore = [
+  "E501",  # long lines (allowed for now)
+  "B008",  # dependency injection default (FastAPI idiom)
+  "F401",  # unused imports (may occur in __init__ for side effects)
+  "F821",  # forward refs in annotations / SQLAlchemy relationships
+  "B904",  # explicit exception chaining (optional style)
+  "I001",  # import sorting (defer until later cleanup)
+  "UP006", # use list instead of List (defer modernization)
+  "UP035", # typing.List deprecated (defer modernization)
+]
+
+[lint.isort]
+known-first-party = ["app"]
+
+[lint.per-file-ignores]
+"alembic/versions/*" = ["I001", "E501"]
+
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
