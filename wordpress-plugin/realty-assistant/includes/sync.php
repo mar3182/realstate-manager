@@ -19,16 +19,21 @@ function rai_sync_properties() {
 
     $response = wp_remote_get( $endpoint, $args );
     if ( is_wp_error( $response ) ) {
+        rai_update_sync_status( false, $response->get_error_message() );
         return $response;
     }
     $code = wp_remote_retrieve_response_code( $response );
     if ( $code !== 200 ) {
-        return new WP_Error( 'rai_sync_failed', 'Unexpected status: ' . $code );
+        $err = new WP_Error( 'rai_sync_failed', 'Unexpected status: ' . $code );
+        rai_update_sync_status( false, 'HTTP ' . $code );
+        return $err;
     }
     $body = wp_remote_retrieve_body( $response );
     $data = json_decode( $body, true );
     if ( ! is_array( $data ) ) {
-        return new WP_Error( 'rai_invalid_json', 'Invalid JSON response' );
+        $err = new WP_Error( 'rai_invalid_json', 'Invalid JSON response' );
+        rai_update_sync_status( false, 'Invalid JSON' );
+        return $err;
     }
     $count = 0;
     foreach ( $data as $prop ) {
@@ -112,5 +117,17 @@ function rai_sync_properties() {
         $count++;
         wp_reset_postdata();
     }
+    rai_update_sync_status( true );
     return [ 'count' => $count ];
+}
+
+function rai_update_sync_status( $success, $error_message = '' ) {
+    $status = get_option( RAI_STATUS_OPTION, [] );
+    if ( $success ) {
+        $status['last_success'] = time();
+        unset( $status['last_error'] );
+    } else {
+        $status['last_error'] = $error_message;
+    }
+    update_option( RAI_STATUS_OPTION, $status );
 }
