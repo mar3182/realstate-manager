@@ -28,6 +28,8 @@ async def create_property(
         description=payload.description,
         price=payload.price,
         address=payload.address,
+    cover_image_url=payload.cover_image_url,
+    images=payload.images,
         agency_id=agency.id,
     )
     db.add(prop)

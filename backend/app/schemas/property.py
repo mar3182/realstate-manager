@@ -12,6 +12,8 @@ class PropertyBase(BaseModel):
     description: str | None = None
     price: float | None = None
     address: str | None = None
+    cover_image_url: str | None = None
+    images: list[str] | None = None
 
 class PropertyCreate(PropertyBase):
     agency_id: int | None = None  # deprecated; tenant inferred
