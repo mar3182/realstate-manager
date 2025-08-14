@@ -104,15 +104,51 @@ function rai_sync_properties() {
             }
         }
 
-        // Gallery images (store URLs as array meta, avoid download for MVP)
+        // Gallery images: download & attach (with caching by URL)
         if ( isset( $prop['images'] ) && is_array( $prop['images'] ) ) {
-            $gallery_urls = [];
+            $raw_urls = []; // sanitized ordered urls from backend
             foreach ( $prop['images'] as $img_url ) {
                 if ( is_string( $img_url ) && filter_var( $img_url, FILTER_VALIDATE_URL ) ) {
-                    $gallery_urls[] = esc_url_raw( $img_url );
+                    $raw_urls[] = esc_url_raw( $img_url );
                 }
             }
-            update_post_meta( $existing_id, '_rai_gallery_urls', $gallery_urls );
+            update_post_meta( $existing_id, '_rai_gallery_urls', $raw_urls );
+
+            if ( $raw_urls ) {
+                if ( ! function_exists( 'media_handle_sideload' ) ) {
+                    require_once ABSPATH . 'wp-admin/includes/media.php';
+                    require_once ABSPATH . 'wp-admin/includes/file.php';
+                    require_once ABSPATH . 'wp-admin/includes/image.php';
+                }
+                $url_map = get_post_meta( $existing_id, '_rai_gallery_url_map', true );
+                if ( ! is_array( $url_map ) ) { $url_map = []; }
+                $attachment_ids = [];
+                $processed = 0;
+                foreach ( $raw_urls as $gurl ) {
+                    $processed++;
+                    if ( $processed > 25 ) { // safety limit
+                        break;
+                    }
+                    if ( isset( $url_map[ $gurl ] ) && get_post( $url_map[ $gurl ] ) ) {
+                        $attachment_ids[] = intval( $url_map[ $gurl ] );
+                        continue;
+                    }
+                    $tmp = download_url( $gurl );
+                    if ( is_wp_error( $tmp ) ) { continue; }
+                    $filename = wp_basename( parse_url( $gurl, PHP_URL_PATH ) );
+                    if ( ! $filename ) { $filename = 'rai-gallery-' . time() . '.jpg'; }
+                    $file = [ 'name' => $filename, 'tmp_name' => $tmp ];
+                    $attach_id = media_handle_sideload( $file, $existing_id );
+                    if ( is_wp_error( $attach_id ) ) {
+                        @unlink( $tmp );
+                        continue;
+                    }
+                    $url_map[ $gurl ] = $attach_id;
+                    $attachment_ids[] = $attach_id;
+                }
+                update_post_meta( $existing_id, '_rai_gallery_url_map', $url_map );
+                update_post_meta( $existing_id, '_rai_gallery_attachment_ids', $attachment_ids );
+            }
         }
         $count++;
         wp_reset_postdata();
