@@ -69,6 +69,46 @@ function rai_sync_properties() {
         if ( isset( $prop['address'] ) ) {
             update_post_meta( $existing_id, '_rai_address', sanitize_text_field( $prop['address'] ) );
         }
+        // Cover image handling (download & set featured image if URL provided)
+        if ( ! empty( $prop['cover_image_url'] ) && filter_var( $prop['cover_image_url'], FILTER_VALIDATE_URL ) ) {
+            $cover_url = esc_url_raw( $prop['cover_image_url'] );
+            $prev_url = get_post_meta( $existing_id, '_rai_cover_image_url', true );
+            if ( $cover_url !== $prev_url ) {
+                // Lazy-load media libs
+                if ( ! function_exists( 'media_handle_sideload' ) ) {
+                    require_once ABSPATH . 'wp-admin/includes/media.php';
+                    require_once ABSPATH . 'wp-admin/includes/file.php';
+                    require_once ABSPATH . 'wp-admin/includes/image.php';
+                }
+                $tmp = download_url( $cover_url );
+                if ( ! is_wp_error( $tmp ) ) {
+                    $filename = wp_basename( parse_url( $cover_url, PHP_URL_PATH ) );
+                    if ( ! $filename ) { $filename = 'rai-cover-' . time() . '.jpg'; }
+                    $file = [
+                        'name' => $filename,
+                        'tmp_name' => $tmp,
+                    ];
+                    $attach_id = media_handle_sideload( $file, $existing_id );
+                    if ( is_wp_error( $attach_id ) ) {
+                        @unlink( $tmp );
+                    } else {
+                        set_post_thumbnail( $existing_id, $attach_id );
+                        update_post_meta( $existing_id, '_rai_cover_image_url', $cover_url );
+                    }
+                }
+            }
+        }
+
+        // Gallery images (store URLs as array meta, avoid download for MVP)
+        if ( isset( $prop['images'] ) && is_array( $prop['images'] ) ) {
+            $gallery_urls = [];
+            foreach ( $prop['images'] as $img_url ) {
+                if ( is_string( $img_url ) && filter_var( $img_url, FILTER_VALIDATE_URL ) ) {
+                    $gallery_urls[] = esc_url_raw( $img_url );
+                }
+            }
+            update_post_meta( $existing_id, '_rai_gallery_urls', $gallery_urls );
+        }
         $count++;
         wp_reset_postdata();
     }

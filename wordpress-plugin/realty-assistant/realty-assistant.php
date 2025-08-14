@@ -20,6 +20,30 @@ require_once RAI_PLUGIN_DIR . 'includes/settings.php';
 require_once RAI_PLUGIN_DIR . 'includes/cpt-property.php';
 require_once RAI_PLUGIN_DIR . 'includes/sync.php';
 
+// Admin list columns: thumbnail
+function rai_property_columns( $columns ) {
+    $new = [];
+    $new['cb'] = $columns['cb'];
+    $new['thumbnail'] = 'Image';
+    foreach ( $columns as $key => $label ) {
+        if ( $key === 'cb' ) continue;
+        $new[$key] = $label;
+    }
+    return $new;
+}
+add_filter( 'manage_rai_property_posts_columns', 'rai_property_columns' );
+
+function rai_property_column_content( $column, $post_id ) {
+    if ( $column === 'thumbnail' ) {
+        if ( has_post_thumbnail( $post_id ) ) {
+            echo get_the_post_thumbnail( $post_id, [60,60] );
+        } else {
+            echo '<span style="opacity:.5">—</span>';
+        }
+    }
+}
+add_action( 'manage_rai_property_posts_custom_column', 'rai_property_column_content', 10, 2 );
+
 // Activation: ensure CPT registered then flush permalinks
 function rai_activate() {
     rai_register_property_cpt();
