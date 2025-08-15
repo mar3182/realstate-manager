@@ -22,6 +22,62 @@ require_once RAI_PLUGIN_DIR . 'includes/sync.php';
 require_once RAI_PLUGIN_DIR . 'includes/meta-box.php';
 require_once RAI_PLUGIN_DIR . 'includes/ai.php';
 
+// Queue constants
+define( 'RAI_AI_QUEUE_OPTION', 'rai_ai_queue' ); // array of post IDs FIFO
+define( 'RAI_AI_QUEUE_LOCK', 'rai_ai_queue_lock' ); // transient lock
+define( 'RAI_AI_QUEUE_LAST_RUN', 'rai_ai_queue_last_run' );
+
+// Enqueue function
+function rai_ai_enqueue( $post_id ) {
+    $q = get_option( RAI_AI_QUEUE_OPTION, [] );
+    $post_id = intval( $post_id );
+    if ( ! in_array( $post_id, $q, true ) ) {
+        $q[] = $post_id;
+        update_option( RAI_AI_QUEUE_OPTION, $q, false );
+    }
+}
+
+// Dequeue helper
+function rai_ai_dequeue_batch( $max = 3 ) {
+    $q = get_option( RAI_AI_QUEUE_OPTION, [] );
+    if ( ! $q ) { return []; }
+    $batch = array_splice( $q, 0, $max );
+    update_option( RAI_AI_QUEUE_OPTION, $q, false );
+    return $batch;
+}
+
+// Processor (cron)
+function rai_ai_process_queue() {
+    if ( get_transient( RAI_AI_QUEUE_LOCK ) ) {
+        return; // locked / already running
+    }
+    set_transient( RAI_AI_QUEUE_LOCK, 1, 30 );
+    $processed = 0;
+    $batch = rai_ai_dequeue_batch( 3 );
+    foreach ( $batch as $pid ) {
+        $res = rai_regenerate_ai_description( $pid );
+        $processed++;
+        // Store history minimal
+        $hist = get_post_meta( $pid, '_rai_ai_history', true );
+        if ( ! is_array( $hist ) ) { $hist = []; }
+        $hist[] = [ 't' => time(), 'ok' => $res['success'] ? 1 : 0 ];
+        if ( count( $hist ) > 20 ) { $hist = array_slice( $hist, -20 ); }
+        update_post_meta( $pid, '_rai_ai_history', $hist );
+    }
+    update_option( RAI_AI_QUEUE_LAST_RUN, time(), false );
+    delete_transient( RAI_AI_QUEUE_LOCK );
+    return $processed;
+}
+
+// Schedule processor every 5 minutes
+add_action( 'rai_ai_queue_tick', 'rai_ai_process_queue' );
+add_filter( 'cron_schedules', function( $schedules ) {
+    if ( ! isset( $schedules['five_minutes'] ) ) {
+        $schedules['five_minutes'] = [ 'interval' => 300, 'display' => 'Every 5 Minutes' ];
+    }
+    return $schedules;
+} );
+
 // Admin list columns: thumbnail + price + address
 function rai_property_columns( $columns ) {
     $new = [];
@@ -122,25 +178,17 @@ add_filter( 'bulk_actions-edit-rai_property', function( $bulk_actions ) {
 
 add_filter( 'handle_bulk_actions-edit-rai_property', function( $redirect, $doaction, $post_ids ) {
     if ( $doaction === 'rai_bulk_ai_regen' ) {
-        $success = 0; $fail = 0;
-        foreach ( $post_ids as $pid ) {
-            $res = rai_regenerate_ai_description( $pid );
-            if ( $res['success'] ) { $success++; } else { $fail++; }
-        }
-        $redirect = add_query_arg( [
-            'rai_bulk_ai_done' => 1,
-            'rai_bulk_ai_success' => $success,
-            'rai_bulk_ai_fail' => $fail,
-        ], $redirect );
+        $queued = 0;
+        foreach ( $post_ids as $pid ) { rai_ai_enqueue( $pid ); $queued++; }
+        $redirect = add_query_arg( [ 'rai_bulk_ai_enqueued' => $queued ], $redirect );
     }
     return $redirect;
 }, 10, 3 );
 
 add_action( 'admin_notices', function() {
-    if ( isset( $_GET['rai_bulk_ai_done'] ) ) {
-        $s = intval( $_GET['rai_bulk_ai_success'] ?? 0 );
-        $f = intval( $_GET['rai_bulk_ai_fail'] ?? 0 );
-        echo '<div class="notice notice-info is-dismissible"><p>AI regeneration complete: ' . esc_html( $s ) . ' success, ' . esc_html( $f ) . ' failed.</p></div>';
+    if ( isset( $_GET['rai_bulk_ai_enqueued'] ) ) {
+        $q = intval( $_GET['rai_bulk_ai_enqueued'] );
+        echo '<div class="notice notice-info is-dismissible"><p>Enqueued ' . esc_html( $q ) . ' properties for AI regeneration (processed in background every 5 minutes).</p></div>';
     }
 } );
 
@@ -151,6 +199,9 @@ function rai_activate() {
     if ( ! wp_next_scheduled( 'rai_hourly_sync' ) ) {
         wp_schedule_event( time() + 60, 'hourly', 'rai_hourly_sync' );
     }
+    if ( ! wp_next_scheduled( 'rai_ai_queue_tick' ) ) {
+        wp_schedule_event( time() + 120, 'five_minutes', 'rai_ai_queue_tick' );
+    }
 }
 register_activation_hook( __FILE__, 'rai_activate' );
 
@@ -158,6 +209,10 @@ function rai_deactivate() {
     $timestamp = wp_next_scheduled( 'rai_hourly_sync' );
     if ( $timestamp ) {
         wp_unschedule_event( $timestamp, 'rai_hourly_sync' );
+    }
+    $ts2 = wp_next_scheduled( 'rai_ai_queue_tick' );
+    if ( $ts2 ) {
+        wp_unschedule_event( $ts2, 'rai_ai_queue_tick' );
     }
     flush_rewrite_rules();
 }
